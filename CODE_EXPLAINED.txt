@@ -1,0 +1,185 @@
+INVENTORA — CODE LOGIC EXPLAINED
+==================================
+A plain-English walkthrough of every main file in the project.
+================================================================
+
+
+1. ENTRY POINT — main.js
+------------------------
+This is the first file that runs when the app starts.
+
+  createApp(App)     → creates the Vue application using App.vue as the root
+  .use(createPinia())→ installs Pinia so all stores are available everywhere
+  .use(router)       → installs Vue Router so URLs map to pages
+  .mount('#app')     → attaches everything to the <div id="app"> in index.html
+
+Think of it as the "wiring" file — it connects all the pieces together.
+
+
+2. ROOT SHELL — App.vue
+------------------------
+This is the outer wrapper that every page sits inside.
+
+  <AppSidebar />       → renders the left navigation bar (always visible)
+  <router-view />      → this is a placeholder; Vue Router swaps in the correct
+                         page component here based on the current URL
+
+  / (root URL)         → DashboardView loads into <router-view>
+  /products            → ProductsView loads into <router-view>
+
+The sidebar stays fixed; only the main content area changes when you navigate.
+
+
+3. ROUTING — router/index.js
+-----------------------------
+Defines which URL path shows which page component.
+
+  path: '/'          → loads DashboardView.vue
+  path: '/products'  → loads ProductsView.vue
+  path: '/:any(.*)'  → catches any unknown URL and redirects to '/'
+
+  createWebHistory() → gives clean URLs like /products (no # in the address bar)
+
+  Lazy loading: each component is imported as () => import('...')
+  This means the page file is only downloaded when the user actually visits it,
+  keeping the initial load fast.
+
+
+4. STATE MANAGEMENT — stores/productStore.js
+--------------------------------------------
+This is the heart of the app. Pinia is a "global state" library — it holds
+data that any component can read or change without passing props around.
+
+  WHY A STORE?
+  If you kept product data inside a single component, other components
+  (like the sidebar showing a product count) couldn't see it.
+  The store lives outside all components, so everyone shares the same data.
+
+  STATE (the data):
+    products = ref([...])
+      A reactive array of product objects. "reactive" means: whenever this
+      array changes, every part of the UI reading it automatically re-renders.
+
+  EXPORTED CONSTANT (not state):
+    CATEGORIES = [...]
+      Categories never change at runtime, so they are a plain JS constant —
+      no need to make them reactive. Components just import and read this list.
+
+  GETTERS (computed values derived from state):
+    lowStock   → filters products where stock <= minStock
+    totalValue → multiplies price × stock for every product and sums them up
+
+    These are "computed" — Vue recalculates them automatically whenever
+    products changes. You never call them as functions; you read them like
+    a property (ps.lowStock, ps.totalValue).
+
+  ACTIONS (functions that change state):
+    addProduct(data)        → pushes a new product object into products[]
+    deleteProduct(id)       → finds the product by id and splices it out
+    adjustStock(id, delta)  → finds the product and adds delta to its stock
+                              (delta can be negative to reduce stock)
+                              Math.max(0, ...) ensures stock never goes below 0
+
+
+5. SIDEBAR COMPONENT — components/AppSidebar.vue
+-------------------------------------------------
+A simple navigation panel rendered on the left side of every page.
+
+  It imports useProductStore() to read two live values:
+    ps.products.length      → total number of products
+    ps.lowStock.length      → how many products are below minimum stock
+
+  Because these come from the Pinia store (which is reactive), the numbers
+  in the sidebar update automatically whenever products are added or deleted —
+  no manual refresh needed.
+
+  <router-link to="/">         → clicking this changes the URL to /
+  <router-link to="/products"> → clicking this changes the URL to /products
+
+  router-link-active is a CSS class Vue Router adds automatically to the link
+  whose path matches the current URL, so the active page is highlighted.
+
+
+6. DASHBOARD PAGE — views/DashboardView.vue
+--------------------------------------------
+Route: /  (the home page)
+
+  Imports useProductStore() and reads:
+    ps.products.length  → total product count (shown in a stat card)
+    ps.totalValue       → total inventory value ($)
+    ps.lowStock         → list of under-stocked products
+
+  totalStock is a local computed() that sums ps.products[].stock.
+  It is local (not in the store) because only this page needs it.
+
+  The low-stock section uses v-for to loop over ps.lowStock and render
+  one row per product. If the list is empty, a friendly message shows instead
+  (controlled by v-if / v-else).
+
+  No user actions happen here — it is read-only.
+
+
+7. PRODUCTS PAGE — views/ProductsView.vue
+------------------------------------------
+Route: /products
+
+  This page does three things:
+
+  A) ADD PRODUCT
+     A form at the top is bound to a local ref called "f" (the form data).
+     v-model links each input field to f.name, f.price, f.stock, etc.
+     When the form is submitted (@submit.prevent="add"):
+       - ps.addProduct({ ...f.value }) is called to add it to the store
+       - f is reset to empty values so the form is ready for the next entry
+     .prevent stops the browser from doing a full page reload on submit.
+
+  B) DISPLAY ALL PRODUCTS
+     v-for="p in ps.products" loops over the store's product array and
+     renders one table row per product. Because ps.products is reactive,
+     the table automatically updates when a product is added or deleted.
+
+  C) STOCK ADJUST + DELETE
+     Each row has three buttons wired directly to store actions:
+       @click="ps.adjustStock(p.id, 10)"  → adds 10 units
+       @click="ps.adjustStock(p.id, -10)" → removes 10 units (min 0)
+       @click="ps.deleteProduct(p.id)"    → removes the product entirely
+
+     CATEGORIES imported from the store is used by the cat() helper to
+     look up the name and icon for a product's categoryId and display it
+     in the table.
+
+
+8. GLOBAL STYLES — style.css
+------------------------------
+Uses CSS Custom Properties (variables) defined in :root so every file
+can reference the same colours and sizes by name rather than hard-coding them.
+
+  --primary, --danger, --success, --warning  → colour tokens
+  --bg-root, --bg-card, --bg-sidebar         → background layers
+  --text, --text-2, --text-3                 → text colour hierarchy
+  --radius, --radius-lg                      → border-radius sizes
+  --border                                   → a consistent border colour
+
+  Utility classes like .btn, .card, .badge, .form-input are defined once
+  here and reused across all components, keeping each component's own
+  <style scoped> block small.
+
+
+================================================================
+SUMMARY — HOW DATA FLOWS
+================================================================
+
+  User fills form  →  f ref updates (local state in ProductsView)
+        |
+        ↓ on submit
+  ps.addProduct()  →  products[] in Pinia store grows by 1
+        |
+        ↓ reactivity kicks in automatically
+  ProductsView table re-renders  (new row appears)
+  AppSidebar count updates       (Total Products +1)
+  DashboardView stats update     (if user navigates back)
+
+  Everything stays in sync because all components read from the same
+  reactive store — you change data in one place and the UI updates everywhere.
+
+================================================================
